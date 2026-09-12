@@ -1,4 +1,5 @@
 import * as dgram from "dgram";
+import { lookup as dnsLookup } from "dns/promises";
 import * as crypto from "crypto";
 import { EventEmitter } from "events";
 import {
@@ -90,6 +91,9 @@ export class Ts3Client extends EventEmitter {
   private socket: dgram.Socket | null = null;
   private state: ClientState = "disconnected";
   private opts!: Ts3ClientOptions;
+  // Resolved once at connect time so per-packet sends (e.g. 50/s during voice
+  // playback) don't each trigger a fresh DNS lookup against the hostname.
+  private resolvedHost!: string;
 
   // Packet counters (one per packet type for outgoing)
   private packetCounter = new Uint16Array(9);
@@ -136,6 +140,8 @@ export class Ts3Client extends EventEmitter {
 
   async connect(opts: Ts3ClientOptions): Promise<void> {
     this.opts = opts;
+    const { address } = await dnsLookup(opts.host, { family: 4 });
+    this.resolvedHost = address;
     this.state = "init";
     this.cryptoInitComplete = false;
     this.ivStruct = null;
@@ -518,7 +524,7 @@ export class Ts3Client extends EventEmitter {
     const pflags = ptByte & 0xf0;
     const pid = raw.readUInt16BE(MAC_LEN);
     this.emit("debug", `[OUT] type=${ptype} id=${pid} flags=0x${pflags.toString(16)} len=${raw.length}`);
-    this.socket.send(raw, this.opts.port, this.opts.host);
+    this.socket.send(raw, this.opts.port, this.resolvedHost);
   }
 
   // ====== Incoming Packet Handling ======
