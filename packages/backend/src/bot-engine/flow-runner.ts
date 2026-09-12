@@ -766,7 +766,7 @@ export class FlowRunner {
     const position = parseInt(await ctx.resolveTemplate(data.position));
     if (!botId) throw new Error('Voice Seek: botId is required');
     const bot = mgr.getBot(botId);
-    if (bot) bot.seek(position || 0);
+    if (bot) await bot.seek(position || 0);
   }
 
   private async executeVoiceTts(data: any, ctx: ExecutionContext): Promise<void> {

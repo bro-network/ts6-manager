@@ -37,27 +37,33 @@ export class AudioPipeline {
   }
 
   /**
-   * Convert audio file to raw PCM (48kHz, mono, s16le) at full volume.
+   * Stream a local audio file to raw PCM incrementally (does NOT buffer the
+   * whole file in memory — a multi-hour track would otherwise need well over
+   * a gigabyte of PCM before playback could even start).
    */
-  toPcm(filePath: string): Promise<Buffer> {
-    return this.ffmpegToPcm(filePath);
-  }
-
-  /**
-   * Split raw PCM buffer into 960-sample frames.
-   */
-  splitFrames(pcmData: Buffer): Buffer[] {
-    const frames: Buffer[] = [];
-    for (let offset = 0; offset < pcmData.length; offset += BYTES_PER_FRAME) {
-      let frame = pcmData.subarray(offset, offset + BYTES_PER_FRAME);
-      if (frame.length < BYTES_PER_FRAME) {
-        const padded = Buffer.alloc(BYTES_PER_FRAME, 0);
-        frame.copy(padded);
-        frame = padded;
-      }
-      frames.push(frame);
+  async toPcmFileStream(filePath: string, startSeconds: number = 0): Promise<{ stdout: Readable; process: ChildProcess; kill: () => void }> {
+    const args: string[] = [];
+    if (startSeconds > 0) {
+      args.push("-ss", startSeconds.toFixed(3));
     }
-    return frames;
+    args.push(
+      "-i", filePath,
+      "-f", "s16le",
+      "-acodec", "pcm_s16le",
+      "-ar", String(SAMPLE_RATE),
+      "-ac", String(CHANNELS),
+      "-loglevel", "error",
+      "pipe:1",
+    );
+
+    const ffmpeg = spawn("ffmpeg", args, { shell: false });
+    return {
+      stdout: ffmpeg.stdout,
+      process: ffmpeg,
+      kill: () => {
+        try { ffmpeg.kill("SIGKILL"); } catch { }
+      },
+    };
   }
 
   /**
@@ -124,38 +130,4 @@ export class AudioPipeline {
     };
   }
 
-  private ffmpegToPcm(input: string): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const args = [
-        "-i", input,
-        "-f", "s16le",
-        "-acodec", "pcm_s16le",
-        "-ar", String(SAMPLE_RATE),
-        "-ac", String(CHANNELS),
-        "-loglevel", "error",
-        "pipe:1",
-      ];
-
-      const ffmpeg = spawn("ffmpeg", args, { shell: false });
-      const chunks: Buffer[] = [];
-
-      ffmpeg.stdout.on("data", (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-
-      ffmpeg.stderr.on("data", () => { });
-
-      ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          resolve(Buffer.concat(chunks));
-        } else {
-          reject(new Error(`FFmpeg exited with code ${code}`));
-        }
-      });
-
-      ffmpeg.on("error", (err) => {
-        reject(new Error(`FFmpeg not found or failed to start: ${err.message}`));
-      });
-    });
-  }
 }

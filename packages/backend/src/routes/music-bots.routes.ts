@@ -369,7 +369,7 @@ musicBotRoutes.post('/:id/seek', async (req: Request, res: Response, next) => {
     const bot = manager.getBot(parseInt(req.params.id as string));
     if (!bot) throw new AppError(404, 'Music bot not found');
     const { seconds } = req.body;
-    bot.seek(parseFloat(seconds) || 0);
+    await bot.seek(parseFloat(seconds) || 0);
     res.json({ success: true });
   } catch (err) { next(err); }
 });

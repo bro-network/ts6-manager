@@ -15,6 +15,12 @@ const RECONNECT_GRACE_PERIOD_MS = 5000;
 interface ReconnectState {
   attempts: number;
   timer: ReturnType<typeof setTimeout> | null;
+  // True for the whole duration of an in-flight attemptReconnect() call, not
+  // just while its timer is pending — closes the race where a 'disconnected'
+  // event fires (e.g. from the connect() timeout path) while an attempt is
+  // still awaiting bot.start(), which used to slip past the timer-only guard
+  // and spin up a second concurrent reconnect chain.
+  inFlight: boolean;
 }
 
 export class VoiceBotManager extends EventEmitter {
@@ -312,13 +318,13 @@ export class VoiceBotManager extends EventEmitter {
 
     let state = this.reconnectState.get(botId);
     if (!state) {
-      state = { attempts: 0, timer: null };
+      state = { attempts: 0, timer: null, inFlight: false };
       this.reconnectState.set(botId, state);
     }
 
     // Prevent double-scheduling (can happen when both 'disconnected' handler
     // and attemptReconnect catch block trigger simultaneously)
-    if (state.timer) return;
+    if (state.timer || state.inFlight) return;
 
     if (state.attempts >= MAX_RECONNECT_ATTEMPTS) {
       console.error(`[VoiceBotManager] Bot ${botId}: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`);
@@ -346,8 +352,12 @@ export class VoiceBotManager extends EventEmitter {
       return;
     }
 
-    // Mark timer as executed so scheduleReconnect can run again
+    // Mark timer as executed so scheduleReconnect can run again once this
+    // attempt fully finishes. inFlight is what actually blocks a concurrent
+    // 'disconnected' from scheduling a second chain while bot.start() below
+    // is still pending — it's cleared right before both return paths.
     state.timer = null;
+    state.inFlight = true;
 
     try {
       // Ensure previous connection is fully cleaned up before reconnecting
@@ -360,10 +370,13 @@ export class VoiceBotManager extends EventEmitter {
       this.reconnectState.delete(botId);
     } catch (err: any) {
       console.error(`[VoiceBotManager] Bot ${botId}: reconnect attempt ${state.attempts} failed: ${err.message}`);
+      state.inFlight = false;
       // Schedule next attempt (guard in scheduleReconnect prevents double-scheduling
       // if 'disconnected' event also fires from the failed connect)
       this.scheduleReconnect(botId);
+      return;
     }
+    state.inFlight = false;
   }
 
   private clearReconnect(botId: number): void {
