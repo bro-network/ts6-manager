@@ -664,12 +664,12 @@ export class VoiceBot extends EventEmitter {
     const filePath = this._nowPlaying.filePath;
 
     // Tear down the current ffmpeg process/tick and spawn a fresh one at the seek point.
+    // (startFileStream() below overwrites fileStdout/streamKill/_fileStreamActive itself.)
     this.clearTimer();
     if (this.streamKill) {
       this.streamKill();
       this.streamKill = null;
     }
-    this.fileStdout = null;
     this._fileStreamActive = false;
 
     await this.startFileStream(filePath, target);
