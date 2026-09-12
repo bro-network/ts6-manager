@@ -10,9 +10,15 @@ RUN apt-get update && \
       python3 \
       python3-pip \
       ca-certificates \
-    && python3 -m pip install --break-system-packages --no-cache-dir -U "yt-dlp[default]" \ 
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# ADD from a URL invalidates Docker's build cache whenever the remote content
+# changes (ETag/Last-Modified), so this forces the pip install below to re-run
+# and fetch the current yt-dlp release on every build where a new one shipped,
+# instead of silently reusing whatever version was cached at first build.
+ADD https://pypi.org/pypi/yt-dlp/json /tmp/yt-dlp-version.json
+RUN python3 -m pip install --break-system-packages --no-cache-dir -U "yt-dlp[default]"
 
 WORKDIR /app
 
